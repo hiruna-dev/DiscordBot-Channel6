@@ -7,7 +7,14 @@
 #include <random>
 #include <iomanip>
 
+
+
 using namespace std;
+
+time_t idToTime(dpp::snowflake& id) {
+	uint64_t timestamp = (id >> 22) + 1420070400000;
+	return (timestamp / 1000);
+}
 
 shared_ptr<tm> getTime(const time_t& arg) {
 	auto thetime = make_shared<tm>();
@@ -23,6 +30,15 @@ void printMessages(const shared_ptr<map<time_t, dpp::message>>& list) {
 	}
 }
 
+void printBadMessages(const vector<dpp::message>& list) {
+	cout << endl;
+	cout << "Printing bad messages" << endl << endl;	
+	for (const dpp::message &item : list) {		
+		cout<< "\"" << item.content << "\"" << " sent by " << item.author.global_name << endl;
+	}
+	cout << endl  << "Finished printing bad messages" << endl;
+}
+
 
 
 int main() {
@@ -33,13 +49,14 @@ int main() {
 	bot.on_ready([&bot](const dpp::ready_t& event) {
 		cout << "Bot initiazlied" << endl;
 		auto list = make_shared<map<time_t, dpp::message>>(); //ordered map
+		auto bad_list = make_shared< vector<dpp::message>>(); // list for non 6 messages
 
 		//retrieve params
 		int size = 50;
 
 		auto fetch = make_shared<function<void(dpp::snowflake)>>();
-		*fetch = [list, size, fetch, &bot](dpp::snowflake bef) {
-			bot.messages_get(1457638344883437669, 0, bef, 0, size, [list, size, fetch](dpp::confirmation_callback_t value) {
+		*fetch = [bad_list, list, size, fetch, &bot](dpp::snowflake bef) {
+			bot.messages_get(1457638344883437669, 0, bef, 0, size, [bad_list,list, size, fetch](dpp::confirmation_callback_t value) {
 				if (value.is_error()) { //error
 					cout << "Something went wrong" << endl;
 					cout << value.get_error().human_readable << endl;
@@ -54,9 +71,10 @@ int main() {
 
 				//adding to the ordered map
 				for (dpp::message_map::iterator it = msgs->begin(); it != msgs->end(); it++) {
-					dpp::snowflake id = it->second.id;
-					uint64_t timestamp = (id >> 22) + 1420070400000;
-					time_t seconds = timestamp / 1000;
+					if (it->second.content != "6") { //adding non 6 message to the bad list
+						bad_list->push_back(it->second);
+					}					
+					time_t seconds = idToTime(it->second.id);
 					
 					/*(*list)[seconds] = it->second;*/ //this makes copies
 					list->try_emplace(seconds, move(it->second)); // moving instead of making copies
@@ -69,6 +87,7 @@ int main() {
 					cout << "Finished Retrieving" << endl;
 					cout << endl;
 					printMessages(list);//printing
+					printBadMessages(*bad_list);
 					return;
 				}
 				else {					
