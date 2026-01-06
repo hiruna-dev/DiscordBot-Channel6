@@ -9,6 +9,22 @@
 
 using namespace std;
 
+shared_ptr<tm> getTime(const time_t& arg) {
+	auto thetime = make_shared<tm>();
+	localtime_s(thetime.get(), &arg);
+	return thetime;
+}
+
+void printMessages(const shared_ptr<map<time_t, dpp::message>>& list) {
+	//printing time
+	for (const auto& pair : *list) {
+		auto timeptr = getTime(pair.first);
+		cout << put_time(timeptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl;
+	}
+}
+
+
+
 int main() {
 	dotenv env(".env");
 
@@ -24,37 +40,39 @@ int main() {
 		auto fetch = make_shared<function<void(dpp::snowflake)>>();
 		*fetch = [list, size, fetch, &bot](dpp::snowflake bef) {
 			bot.messages_get(1457638344883437669, 0, bef, 0, size, [list, size, fetch](dpp::confirmation_callback_t value) {
-				if (value.is_error()) {
+				if (value.is_error()) { //error
 					cout << "Something went wrong" << endl;
 					cout << value.get_error().human_readable << endl;
 					return;
 				}
 
 				auto* msgs = get_if<dpp::message_map>(&value.value);
-				if (!msgs) {
+				if (!msgs) { //no messages were found in channel
 					cout << "Messages returned empty" << endl;
 					return;
 				}
 
+				//adding to the ordered map
 				for (dpp::message_map::iterator it = msgs->begin(); it != msgs->end(); it++) {
 					dpp::snowflake id = it->second.id;
 					uint64_t timestamp = (id >> 22) + 1420070400000;
 					time_t seconds = timestamp / 1000;
-
-					(*list)[seconds] = it->second; //adding time to ordered map
+					
+					/*(*list)[seconds] = it->second;*/ //this makes copies
+					list->try_emplace(seconds, move(it->second)); // moving instead of making copies
 				}
-
-				cout << "Retrieved: " << msgs->size() << endl;
+				auto tmptr = getTime(list->begin()->first);
+				cout << "Retrieved: " << msgs->size() << " ending on " << put_time(tmptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl;
 
 				//breaking loop
 				if (msgs->size() < size) {
 					cout << "Finished Retrieving" << endl;
+					cout << endl;
+					printMessages(list);//printing
 					return;
 				}
-				else {
-					dpp::snowflake id = (*list).begin()->second.id;
-					cout << "Snowflake id: " << id << endl;
-					(*fetch)(id);
+				else {					
+					(*fetch)((*list).begin()->second.id); //starting new fetch from the earliest message in the list
 				}
 			});
 		};
@@ -66,13 +84,4 @@ int main() {
 	bot.start(dpp::st_wait);
 
 	return 0;
-}
-
-void printMessages(auto& list) {
-	//printing time
-	for (const auto& pair : list) {
-		tm buf;
-		localtime_s(&buf, &pair.first);
-		cout << std::put_time(&buf, "%Y-%m-%d %H:%M:%S UTC") << endl;
-	}
 }
