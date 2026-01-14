@@ -6,12 +6,12 @@
 #include <dotenv/dotenv.h>
 #include <random>
 #include <iomanip>
-
-
+#include <fstream>
+#include <ctime>
 
 using namespace std;
 
-time_t idToTime(dpp::snowflake& id) {
+time_t idToTime(const dpp::snowflake& id) {
 	uint64_t timestamp = (id >> 22) + 1420070400000;
 	return (timestamp / 1000);
 }
@@ -33,9 +33,29 @@ void printMessages(const shared_ptr<map<time_t, dpp::message>>& list) {
 void printBadMessages(const vector<dpp::message>& list) {
 	cout << endl;
 	cout << "Printing bad messages" << endl << endl;	
-	for (const dpp::message &item : list) {		
-		cout<< "\"" << item.content << "\"" << " sent by " << item.author.global_name << endl;
+
+	//getting current time
+	time_t now = time(0);
+	char time_string[50];
+
+	strftime(time_string, sizeof(time_string), "%Y-%m-%d_%H-%M-%S", localtime(&now));
+	string filename = format("{}.txt", time_string);
+	cout << "Saving to file: " << filename << endl;
+
+	//saving to file
+	ofstream thefile(filename);
+
+	for (const dpp::message &item : list) {	
+		time_t seconds = idToTime(item.id);
+		auto timeptr = getTime(seconds);
+
+		string output = format("\"{}\" sent by {}", item.content, item.author.global_name);
+		
+		cout << output <<  " on " << put_time(timeptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl;; //printing to terminal
+		thefile << output << " on " << put_time(timeptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl; //printing to output file
+		
 	}
+	thefile.close();
 	cout << endl  << "Finished printing bad messages" << endl;
 }
 
