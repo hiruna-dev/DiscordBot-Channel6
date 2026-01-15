@@ -52,7 +52,7 @@ void printBadMessages(const vector<dpp::message>& list) {
 		string output = format("\"{}\" sent by {}", item.content, item.author.global_name);
 		
 		cout << output <<  " on " << put_time(timeptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl;; //printing to terminal
-		thefile << output << " on " << put_time(timeptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl; //printing to output file
+		thefile << output << " on " << put_time(timeptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl; //printing to output file		
 		
 	}
 	thefile.close();
@@ -64,10 +64,40 @@ void printBadMessages(const vector<dpp::message>& list) {
 int main() {
 	dotenv env(".env");
 
-	dpp::cluster bot(env.get("token", ""));
+	dpp::cluster bot(env.get("token", ""), dpp::i_guilds | dpp::i_guild_members);
 
-	bot.on_ready([&bot](const dpp::ready_t& event) {
+	bot.on_ready([&bot](const dpp::ready_t& event) mutable -> dpp::task<void> {
 		cout << "Bot initiazlied" << endl;
+		dpp::snowflake channel_id = 1457638344883437669;
+		auto user = make_shared<dpp::guild_member>();
+		auto channel = make_shared<dpp::channel>();
+
+		//retrieving the channel
+		dpp::confirmation_callback_t res = co_await bot.co_channel_get(channel_id);		
+		if (res.is_error()) {
+			cout << "[ERROR] " << res.get_error().human_readable << endl;
+			co_return;
+		}
+		else {
+			*channel = res.get<dpp::channel>();			
+		}
+
+		//retrieving the user
+		dpp::confirmation_callback_t user_res = co_await bot.co_guild_get_member(channel->guild_id, bot.me.id);
+		if (res.is_error()) {
+			cout << "[ERROR] " << user_res.get_error().human_readable << endl;
+		}
+		else {
+			*user = user_res.get<dpp::guild_member>();
+		}
+
+		//retrieving the perms
+		dpp::permission perms = channel->get_user_permissions(*user);
+		if (!perms.can(dpp::p_manage_messages)) {
+			cout << "Missing permissions to manage messages" << endl;
+			co_return;
+		}
+
 		auto list = make_shared<map<time_t, dpp::message>>(); //ordered map
 		auto bad_list = make_shared< vector<dpp::message>>(); // list for non 6 messages
 
@@ -75,8 +105,8 @@ int main() {
 		int size = 50;
 
 		auto fetch = make_shared<function<void(dpp::snowflake)>>();
-		*fetch = [bad_list, list, size, fetch, &bot](dpp::snowflake bef) {
-			bot.messages_get(1457638344883437669, 0, bef, 0, size, [bad_list,list, size, fetch](dpp::confirmation_callback_t value) {
+		*fetch = [channel_id,bad_list, list, size, fetch, &bot](dpp::snowflake bef) {
+			bot.messages_get(channel_id, 0, bef, 0, size, [bad_list,list, size, fetch, &bot](dpp::confirmation_callback_t value) {
 				if (value.is_error()) { //error
 					cout << "Something went wrong" << endl;
 					cout << value.get_error().human_readable << endl;
@@ -108,6 +138,16 @@ int main() {
 					cout << endl;
 					printMessages(list);//printing
 					printBadMessages(*bad_list);
+
+					//deleting bad messages
+					for (auto &item : *bad_list) {
+						bot.message_delete(item.id, item.channel_id, [](dpp::confirmation_callback_t value) {
+							if (value.is_error()) {
+								cout << "[ERROR] " << value.get_error().human_readable << endl;
+							}
+						});
+					}
+
 					return;
 				}
 				else {					
