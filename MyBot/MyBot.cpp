@@ -66,98 +66,133 @@ int main() {
 
 	dpp::cluster bot(env.get("token", ""), dpp::i_guilds | dpp::i_guild_members);
 
-	bot.on_ready([&bot](const dpp::ready_t& event) mutable -> dpp::task<void> {
-		cout << "Bot initiazlied" << endl;
-		dpp::snowflake channel_id = 1457638344883437669;
-		auto user = make_shared<dpp::guild_member>();
-		auto channel = make_shared<dpp::channel>();
+	bot.on_slashcommand([&bot](const dpp::slashcommand_t event) mutable -> dpp::task<void> {
+		if (event.command.get_command_name() == "clean_channel") {			
+			auto user = make_shared<dpp::guild_member>();
+			auto channel = make_shared<dpp::channel>();
 
-		//retrieving the channel
-		dpp::confirmation_callback_t res = co_await bot.co_channel_get(channel_id);		
-		if (res.is_error()) {
-			cout << "[ERROR] " << res.get_error().human_readable << endl;
-			co_return;
-		}
-		else {
-			*channel = res.get<dpp::channel>();			
-		}
+			//retrieving the channel
+			*channel = event.command.get_channel();
+			dpp::snowflake channel_id = channel->id;
 
-		//retrieving the user
-		dpp::confirmation_callback_t user_res = co_await bot.co_guild_get_member(channel->guild_id, bot.me.id);
-		if (res.is_error()) {
-			cout << "[ERROR] " << user_res.get_error().human_readable << endl;
-		}
-		else {
-			*user = user_res.get<dpp::guild_member>();
-		}
+			event.reply("Processing");			
+			
+			//getting the original response
+			dpp::confirmation_callback_t orig_resp = co_await event.co_get_original_response();
+			if (orig_resp.is_error()) {
+				cout << "[ERROR]" << orig_resp.get_error().human_readable << endl;
+				co_return;
+			}
+			else {
+				//deleting message
+				dpp::message msg = get<dpp::message>(orig_resp.value);
+				dpp::confirmation_callback_t msg_delete = co_await bot.co_message_delete(msg.id, channel_id);
 
-		//retrieving the perms
-		dpp::permission perms = channel->get_user_permissions(*user);
-		if (!perms.can(dpp::p_manage_messages)) {
-			cout << "Missing permissions to manage messages" << endl;
-			co_return;
-		}
-
-		auto list = make_shared<map<time_t, dpp::message>>(); //ordered map
-		auto bad_list = make_shared< vector<dpp::message>>(); // list for non 6 messages
-
-		//retrieve params
-		int size = 50;
-
-		auto fetch = make_shared<function<void(dpp::snowflake)>>();
-		*fetch = [channel_id,bad_list, list, size, fetch, &bot](dpp::snowflake bef) {
-			bot.messages_get(channel_id, 0, bef, 0, size, [bad_list,list, size, fetch, &bot](dpp::confirmation_callback_t value) {
-				if (value.is_error()) { //error
-					cout << "Something went wrong" << endl;
-					cout << value.get_error().human_readable << endl;
-					return;
+				if (msg_delete.is_error()) {
+					cout << "[ERROR] " << msg_delete.get_error().human_readable << endl;
+					co_return;
 				}
-
-				auto* msgs = get_if<dpp::message_map>(&value.value);
-				if (!msgs) { //no messages were found in channel
-					cout << "Messages returned empty" << endl;
-					return;
+				else {
+					cout << "Bot message deleted" << endl;
 				}
+			}
 
-				//adding to the ordered map
-				for (dpp::message_map::iterator it = msgs->begin(); it != msgs->end(); it++) {
-					if (it->second.content != "6") { //adding non 6 message to the bad list
-						bad_list->push_back(it->second);
-					}					
-					time_t seconds = idToTime(it->second.id);
-					
-					/*(*list)[seconds] = it->second;*/ //this makes copies
-					list->try_emplace(seconds, move(it->second)); // moving instead of making copies
-				}
-				auto tmptr = getTime(list->begin()->first);
-				cout << "Retrieved: " << msgs->size() << " ending on " << put_time(tmptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl;
+			
 
-				//breaking loop
-				if (msgs->size() < size) {
-					cout << "Finished Retrieving" << endl;
-					cout << endl;
-					printMessages(list);//printing
-					printBadMessages(*bad_list);
+			//retrieving the user
+			dpp::confirmation_callback_t user_res = co_await bot.co_guild_get_member(channel->guild_id, bot.me.id);
+			if (user_res.is_error()) {
+				cout << "[ERROR] " << user_res.get_error().human_readable << endl;
+				co_return;
+			}
+			else {
+				*user = user_res.get<dpp::guild_member>();
+			}
 
-					//deleting bad messages
-					for (auto &item : *bad_list) {
-						bot.message_delete(item.id, item.channel_id, [](dpp::confirmation_callback_t value) {
-							if (value.is_error()) {
-								cout << "[ERROR] " << value.get_error().human_readable << endl;
-							}
-						});
+			//retrieving the perms
+			dpp::permission perms = channel->get_user_permissions(*user);
+			if (!perms.can(dpp::p_manage_messages)) {
+				cout << "Missing permissions to manage messages" << endl;
+				co_return;
+			}
+
+			auto list = make_shared<map<time_t, dpp::message>>(); //ordered map
+			auto bad_list = make_shared< vector<dpp::message>>(); // list for non 6 messages
+
+			//retrieve params
+			int size = 50;
+
+			auto fetch = make_shared<function<void(dpp::snowflake)>>();
+			*fetch = [channel_id, bad_list, list, size, fetch, &bot](dpp::snowflake bef) {
+				bot.messages_get(channel_id, 0, bef, 0, size, [bad_list, list, size, fetch, &bot](dpp::confirmation_callback_t value) {
+					if (value.is_error()) { //error
+						cout << "Something went wrong" << endl;
+						cout << value.get_error().human_readable << endl;
+						return;
 					}
 
-					return;
-				}
-				else {					
-					(*fetch)((*list).begin()->second.id); //starting new fetch from the earliest message in the list
-				}
-			});
-		};
+					auto* msgs = get_if<dpp::message_map>(&value.value);
+					if (!msgs) { //no messages were found in channel
+						cout << "Messages returned empty" << endl;
+						return;
+					}
 
-		// starting the fetch lambda
-		(*fetch)(0);
+					//adding to the ordered map
+					for (dpp::message_map::iterator it = msgs->begin(); it != msgs->end(); it++) {
+						if (it->second.content != "6") { //adding non 6 message to the bad list
+							bad_list->push_back(it->second);
+						}
+						time_t seconds = idToTime(it->second.id);
+
+						/*(*list)[seconds] = it->second;*/ //this makes copies
+						list->try_emplace(seconds, move(it->second)); // moving instead of making copies
+					}
+					auto tmptr = getTime(list->begin()->first);
+					cout << "Retrieved: " << msgs->size() << " ending on " << put_time(tmptr.get(), "%Y-%m-%d %H:%M:%S UTC") << endl;
+
+					//breaking loop
+					if (msgs->size() < size) {
+						cout << "Finished Retrieving" << endl;
+						cout << endl;
+						printMessages(list);//printing
+						printBadMessages(*bad_list);
+
+						//deleting bad messages
+						for (auto& item : *bad_list) {
+							bot.message_delete(item.id, item.channel_id, [](dpp::confirmation_callback_t value) {
+								if (value.is_error()) {
+									cout << "[ERROR] " << value.get_error().human_readable << endl;
+								}
+								});
+						}
+
+						return;
+					}
+					else {
+						(*fetch)((*list).begin()->second.id); //starting new fetch from the earliest message in the list
+					}
+					});
+				};
+
+			// starting the fetch lambda
+			(*fetch)(0);
+		}
+	});
+
+	bot.on_ready([&bot](const dpp::ready_t& event) {
+		//registering the slash commands
+		if (dpp::run_once<struct register_bot_commands>()) {
+			cout << "Registering commands" << endl;
+
+			vector<dpp::slashcommand> list;
+			dpp::slashcommand clean_command("clean_channel", "This command will delete all the non 6 messages from this channel", bot.me.id);
+			list.push_back(clean_command);
+			bot.global_bulk_command_create(list);
+
+			cout << "Registered commands" << endl << endl;
+		}
+
+		cout << "Bot initiazlied" << endl;
 	});
 
 	bot.start(dpp::st_wait);
